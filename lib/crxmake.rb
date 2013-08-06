@@ -8,8 +8,17 @@ require 'fileutils'
 require 'find'
 require 'pathname'
 
+begin
+	require 'openssl_pkcs8'
+	class OpenSSL::PKey::RSA
+		alias_method :to_pem, :to_pem_pkcs8
+	end
+rescue LoadError
+	$pkcs8_warning=1
+end
+
 class CrxMake < Object
-  VERSION = '2.0.7'
+  VERSION = '2.1.2'
   # thx masover
   MAGIC = 'Cr24'
 
@@ -31,11 +40,11 @@ class CrxMake < Object
     else
       generate_key
     end
-    create_zip
-    sign_zip
-    write_crx
+    zip_buffer = create_zip
+    sign_zip(zip_buffer)
+    write_crx(zip_buffer)
   ensure
-    final
+    #remove_zip
   end
 
   def zip
@@ -44,10 +53,12 @@ class CrxMake < Object
       generate_key
       @pkey = @pkey_o
     end
-    create_zip do |zip|
+    #remove_zip
+    zip_buffer = create_zip do |zip|
       puts "include pem key: \"#{@pkey}\"" if @verbose
       zip.add('key.pem', @pkey)
     end
+    File.open(@zip,'wb'){|f|f<<zip_buffer}
   end
 
   private
@@ -135,22 +146,26 @@ ext dir: \"#{@exdir}\"
   def read_key
     puts "read pemkey: \"#{@pkey}\"" if @verbose
     File.open(@pkey, 'rb') do |io|
-      @key = OpenSSL::PKey::RSA.new(io)
+      @key = OpenSSL::PKey::RSA.new(io.read)
     end
   end
 
   def generate_key
+    if defined?($pkcs8_warning)&&@verbose
+      $stderr.puts 'Warn: generated pem must be converted into PKCS8 in order to upload to Chrome WebStore.'
+      $stderr.puts 'To suppress this message, do: gem install openssl_pkcs8'
+    end
     puts "generate pemkey to  \"#{@pkey_o}\"" if @verbose
     @key = OpenSSL::PKey::RSA.generate(KEY_SIZE)
     # save key
     File.open(@pkey_o, 'wb') do |file|
-      file << @key.export()
+      file << @key.to_pem
     end
   end
 
   def create_zip
     puts "create zip" if @verbose
-    Zip::ZipFile.open(@zip, Zip::ZipFile::CREATE) do |zip|
+    buffer = Zip::ZipFile.add_buffer do |zip|
       Find.find(@exdir) do |path|
         unless path == @exdir
           if File.directory?(path)
@@ -177,22 +192,24 @@ ext dir: \"#{@exdir}\"
 create zip...done
 zip file at \"#{@zip}\"
     EOS
+    return buffer.string
   end
 
   def get_relative base, target
     Pathname.new(target.to_s).relative_path_from(Pathname.new(base.to_s)).to_s
   end
 
-  def sign_zip
+  def sign_zip(zip_buffer)
     puts "sign zip" if @verbose
     plain = nil
-    File.open(@zip, 'rb') do |file|
-      plain = file.read
-    end
+    #File.open(@zip, 'rb') do |file|
+    #  plain = file.read
+    #end
+    plain = zip_buffer
     @sig = @key.sign(OpenSSL::Digest::SHA1.new, plain)
   end
 
-  def write_crx
+  def write_crx(zip_buffer)
     print "write crx..." if @verbose
     key = @key.public_key.to_der
     key.index(KEY) != 0 and key = KEY + key
@@ -203,9 +220,10 @@ zip file at \"#{@zip}\"
       file << to_sizet(@sig.size)
       file << key
       file << @sig
-      File.open(@zip, 'rb') do |zip|
-        file << zip.read
-      end
+      #File.open(@zip, 'rb') do |zip|
+      #  file << zip.read
+      #end
+      file << zip_buffer
     end
     puts "done at \"#{@crx}\"" if @verbose
   end
@@ -214,9 +232,9 @@ zip file at \"#{@zip}\"
     return [num].pack('V')
   end
 
-  def final
-    FileUtils.rm_rf(@zip) if @zip && File.exist?(@zip)
-  end
+  #def remove_zip
+  #  FileUtils.rm_rf(@zip) if @zip && File.exist?(@zip)
+  #end
 
   class << self
     def make opt
