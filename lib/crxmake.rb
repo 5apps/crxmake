@@ -167,6 +167,7 @@ ext dir: \"#{@exdir}\"
     puts "create zip" if @verbose
     buffer = Zip::ZipFile.add_buffer do |zip|
       Find.find(@exdir) do |path|
+        next unless path.valid_encoding?
         unless path == @exdir
           if File.directory?(path)
             if @ignoredir && File.basename(path) =~ @ignoredir
