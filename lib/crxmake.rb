@@ -1,7 +1,7 @@
 #!/usr/bin/ruby
 # vim: fileencoding=utf-8
 require 'rubygems'
-require 'zip/zip'
+require 'zip'
 require 'openssl'
 require 'digest/sha1'
 require 'fileutils'
@@ -165,7 +165,7 @@ ext dir: \"#{@exdir}\"
 
   def create_zip
     puts "create zip" if @verbose
-    buffer = Zip::ZipFile.add_buffer do |zip|
+    buffer = Zip::File.add_buffer do |zip|
       Find.find(@exdir) do |path|
         next unless path.valid_encoding?
         unless path == @exdir
